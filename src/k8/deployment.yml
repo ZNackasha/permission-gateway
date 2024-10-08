@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: echo-pod
+    spec:
+      containers:
+        - name: echoer
+          image: mendhak/http-https-echo:34
+          env:
+            - name: HTTP_PORT
+              value: 8888
+            - name: HTTPS_PORT
+              value: 9999
+          ports:
+            - containerPort: 8888
+              name: http-port
+            - containerPort: 9999
+              name: https-port
+        - name: sidecar-container
+          image: sidecar-image
+          # Add any specific configuration for the sidecar container here
+          volumeMounts:
+            - name: config-volume
+              mountPath: /etc/config
+              subPath: app-config.yaml
+      volumes:
+        - name: config-volume
+          configMap:
+            name: app-config

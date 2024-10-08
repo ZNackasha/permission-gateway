@@ -1,11 +1,10 @@
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
 use tokio_tungstenite::WebSocketStream;
-
-use crate::error::Error;
 
 pub struct SessionInsert<'a> {
     pub uuid: String,
@@ -45,11 +44,11 @@ impl SafeSessions {
         }
     }
 
-    pub fn insert<'a>(&self, key: String, value: SessionInsert<'a>) -> Result<(), Error> {
+    pub fn insert<'a>(&self, key: String, value: SessionInsert<'a>) -> Result<()> {
         let mut map = self
             .inner
             .write()
-            .map_err(|_e| Error::from("could not lock key set"))?;
+            .map_err(|_e| anyhow!("could not lock key set"))?;
         map.insert(
             key,
             Arc::new(RwLock::new(Session {
@@ -68,40 +67,40 @@ impl SafeSessions {
         Ok(())
     }
 
-    pub fn remove(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>, Error> {
+    pub fn remove(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>> {
         let mut map = self
             .inner
             .write()
-            .map_err(|_e| Error::from("could not lock key set"))?;
+            .map_err(|_e| anyhow!("could not lock key set"))?;
         Ok(map.remove(key))
     }
 
-    pub fn get(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>, Error> {
+    pub fn get(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>> {
         let map = self
             .inner
             .read()
-            .map_err(|_e| Error::from("could not lock key set"))?;
+            .map_err(|_e| anyhow!("could not lock key set"))?;
         Ok(map.get(key).cloned())
     }
 
     #[allow(dead_code)]
-    pub fn get_fun<F, T>(&self, key: &str, callback: F) -> Result<T, Error>
+    pub fn get_fun<F, T>(&self, key: &str, callback: F) -> Result<T>
     where
-        F: FnOnce(Option<Arc<RwLock<Session>>>) -> Result<T, Error>,
+        F: FnOnce(Option<Arc<RwLock<Session>>>) -> Result<T>,
     {
         let map = self
             .inner
             .read()
-            .map_err(|_e| Error::from("could not lock key set"))?;
+            .map_err(|_e| anyhow!("could not lock key set"))?;
         callback(map.get(key).cloned())
     }
 
     #[allow(dead_code)]
-    pub fn contains_key(&self, key: &str) -> Result<bool, Error> {
+    pub fn contains_key(&self, key: &str) -> Result<bool> {
         let map = self
             .inner
             .read()
-            .map_err(|_e| Error::from("could not lock key set"))?;
+            .map_err(|_e| anyhow!("could not lock key set"))?;
         Ok(map.contains_key(key))
     }
 }

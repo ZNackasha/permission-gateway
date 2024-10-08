@@ -1,3 +1,4 @@
+use hyper::Uri;
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -9,11 +10,16 @@ pub struct Permission {
     pub resource: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
 pub struct Config {
     pub listening_address: String,
-    pub iam_url: String,
+
+    pub permission_url: String,
+
     pub encryption_key: String,
-    pub redirect_address: String,
+
+    pub sidecar_url: Uri,
+
+    pub jwt_cookie_name: String,
+
     pub permissions: HashMap<String, Vec<Vec<Permission>>>,
 }

@@ -1,0 +1,26 @@
+version: "3.9"
+services:
+  postgres:
+    image: postgres:14
+    environment:
+      - POSTGRES_USER=dboperator
+      - POSTGRES_PASSWORD=operatorpass123
+      - POSTGRES_DB=postgres
+    ports:
+      - "5243:5432"
+  my-app:
+    image: my-app-image
+    ports:
+      - "8080:8080"
+    environment:
+      - APP_CONFIG_FILE=app-config.yaml
+    volumes:
+      - ./app-config.yaml:/etc/config/app-config.yaml
+  echo:
+    image: mendhak/http-https-echo:34
+    ports:
+      - "8888:8888"
+      - "9999:9999"
+    environment:
+      - HTTP_PORT=8888
+      - HTTPS_PORT=9999

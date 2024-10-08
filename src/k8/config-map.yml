@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+data:
+  app-config.yaml: |
+    # Your configuration data here
+    key1: value1
+    key2: value2
