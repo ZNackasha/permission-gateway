@@ -42,11 +42,7 @@ pub fn gen_socket_key(
     session
         .write()
         .or(Err(anyhow!("could not write from RWLock")))?
-        .set_socket_session(session::SocketSession {
-            uuid: uuid.clone(),
-            hash: hash.to_string(),
-            socket_streams: vec![],
-        });
+        .set_socket_session(uuid.clone(), hash.to_string());
 
     Ok(Response::new(Full::new(Bytes::from(
         (uuid.clone() + "." + hash.as_str()).to_string(),

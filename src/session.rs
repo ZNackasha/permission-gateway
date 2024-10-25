@@ -2,7 +2,6 @@ use anyhow::{anyhow, Result};
 use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::RwLock;
 use tokio::net::TcpStream;
 use tokio_tungstenite::MaybeTlsStream;
@@ -20,6 +19,8 @@ pub struct SocketStreams {
 pub struct SocketSession {
     pub uuid: String,
     pub hash: String,
+    pub receiver: tokio::sync::broadcast::Receiver<String>,
+    pub transmitter: tokio::sync::broadcast::Sender<String>,
     // pub socket_streams: Vec<Arc<Mutex<SocketStreams>>>,
 }
 
@@ -28,7 +29,7 @@ pub struct Session {
     pub refresh_jwt: Jwt,
     pub access_jwt: Jwt,
     pub permissions: Vec<Arc<String>>,
-    pub socket_session: Option<SocketSession>,
+    pub socket_session: Arc<Option<SocketSession>>,
 }
 
 lazy_static::lazy_static! {
@@ -41,7 +42,7 @@ impl Session {
             refresh_jwt,
             access_jwt,
             permissions: vec![],
-            socket_session: None,
+            socket_session: Arc::new(None),
         }
     }
 
@@ -98,8 +99,15 @@ impl Session {
         Ok(Session::new(refresh_jwt, access_jwt))
     }
 
-    pub fn set_socket_session(&mut self, socket_session: SocketSession) {
-        self.socket_session = Some(socket_session);
+    pub fn set_socket_session(&mut self, uuid: String, hash: String) {
+        let (tx, rx) = tokio::sync::broadcast::channel(16);
+        let socket_session = SocketSession {
+            uuid,
+            hash,
+            receiver: rx,
+            transmitter: tx,
+        };
+        self.socket_session = Arc::new(Some(socket_session));
     }
 
     fn get_or_insert_arc_string(value: &str) -> Arc<String> {
@@ -126,20 +134,6 @@ impl Session {
 
     pub fn get_permissions(&self) -> Vec<Arc<String>> {
         self.permissions.clone()
-    }
-
-    pub fn add_socket(&mut self, socket: Arc<SocketStreams>) {
-        if let Some(socket_session) = &mut self.socket_session {
-            socket_session.socket_streams.push(socket);
-        }
-    }
-
-    pub fn get_last_socket(&self) -> Option<&Arc<SocketStreams>> {
-        if let Some(socket_session) = &self.socket_session {
-            socket_session.socket_streams.last()
-        } else {
-            None
-        }
     }
 
     pub fn get_access_jwt(&self) -> &Jwt {
