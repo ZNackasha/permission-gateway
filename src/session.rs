@@ -20,7 +20,7 @@ pub struct SocketStreams {
 pub struct SocketSession {
     pub uuid: String,
     pub hash: String,
-    pub socket_streams: Vec<Arc<Mutex<SocketStreams>>>,
+    // pub socket_streams: Vec<Arc<Mutex<SocketStreams>>>,
 }
 
 #[derive(Debug)]
