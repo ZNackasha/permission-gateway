@@ -1,25 +1,16 @@
 use hyper::Uri;
-use std::collections::HashMap;
 
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-pub struct Permission {
-    pub effect: String,
-    pub action: String,
-    pub resource: String,
-}
+pub type Permission = String;
 
 pub struct Config {
     pub listening_address: String,
 
-    pub permission_url: String,
+    pub permission_url: Uri,
 
-    pub encryption_key: String,
+    pub socket_encryption_key: String,
 
     pub sidecar_url: Uri,
 
-    pub jwt_cookie_name: String,
-
-    pub permissions: HashMap<String, Vec<Vec<Permission>>>,
+    pub access_token_jwt_cookie_name: String,
+    pub refresh_token_jwt_cookie_name: String,
 }

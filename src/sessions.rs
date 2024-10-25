@@ -2,105 +2,71 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::WebSocketStream;
 
-pub struct SessionInsert<'a> {
-    pub uuid: String,
-    pub hash: String,
-    pub exp: u64,
-    pub permissions: Vec<&'a String>,
-    pub server_ws_stream: Option<Arc<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    pub client_ws_stream: Option<Arc<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-}
-
-#[derive(Debug)]
-pub struct Session {
-    pub uuid: String,
-    pub hash: String,
-    pub exp: u64,
-    pub permissions: Vec<Arc<String>>,
-    pub server_ws_stream: Option<Arc<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    pub client_ws_stream: Option<Arc<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-}
+use crate::session::Session;
 
 type Sessions = HashMap<String, Arc<RwLock<Session>>>;
 
 #[derive(Debug)]
 pub struct SafeSessions {
-    permissions: HashMap<String, Arc<String>>,
-    inner: Arc<RwLock<Sessions>>,
+    refresh_token_to_session: Arc<RwLock<Sessions>>,
+    socket_key_to_session: Arc<RwLock<Sessions>>,
 }
 
 impl SafeSessions {
-    pub fn new(permissions: Vec<&String>) -> Self {
+    pub fn new() -> Self {
         SafeSessions {
-            permissions: permissions
-                .iter()
-                .map(|p| ((*p).clone(), Arc::new((*p).clone())))
-                .collect(),
-            inner: Arc::new(RwLock::new(HashMap::new())),
+            refresh_token_to_session: Arc::new(RwLock::new(HashMap::new())),
+            socket_key_to_session: Arc::new(RwLock::new(HashMap::new())),
         }
     }
 
-    pub fn insert<'a>(&self, key: String, value: SessionInsert<'a>) -> Result<()> {
-        let mut map = self
-            .inner
+    pub fn insert<'a>(&self, session: Session) -> Result<Arc<std::sync::RwLock<Session>>> {
+        let mut map: std::sync::RwLockWriteGuard<'_, HashMap<String, Arc<RwLock<Session>>>> = self
+            .refresh_token_to_session
             .write()
             .map_err(|_e| anyhow!("could not lock key set"))?;
-        map.insert(
-            key,
-            Arc::new(RwLock::new(Session {
-                permissions: value
-                    .permissions
-                    .into_iter()
-                    .map(|p| self.permissions.get(p).unwrap().clone())
-                    .collect(),
-                uuid: value.uuid,
-                hash: value.hash,
-                exp: value.exp,
-                server_ws_stream: value.server_ws_stream,
-                client_ws_stream: value.client_ws_stream,
-            })),
-        );
-        Ok(())
+
+        let token = session.get_refresh_jwt().get_full_token().to_string();
+        let session = Arc::new(RwLock::new(session));
+        map.insert(token, session.clone());
+        Ok(session)
     }
 
-    pub fn remove(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>> {
+    pub fn remove(&self, session: &Session) -> Result<Option<Arc<RwLock<Session>>>> {
         let mut map = self
-            .inner
+            .refresh_token_to_session
             .write()
             .map_err(|_e| anyhow!("could not lock key set"))?;
-        Ok(map.remove(key))
+        Ok(map.remove(session.get_refresh_jwt().get_full_token()))
     }
 
-    pub fn get(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>> {
+    pub fn update(&self, session: Session) -> Result<Arc<RwLock<Session>>> {
+        let mut map = self
+            .refresh_token_to_session
+            .write()
+            .map_err(|_e| anyhow!("could not lock key set"))?;
+        let token = session.get_refresh_jwt().get_full_token().to_string();
+        let session = Arc::new(RwLock::new(session));
+        map.insert(token, session.clone());
+        Ok(session)
+    }
+
+    pub fn get(&self, session: &Session) -> Result<Option<Arc<RwLock<Session>>>> {
         let map = self
-            .inner
+            .refresh_token_to_session
+            .read()
+            .map_err(|_e| anyhow!("could not lock key set"))?;
+
+        let token = session.get_refresh_jwt().get_full_token().to_string();
+        Ok(map.get(&token).cloned())
+    }
+
+    pub fn get_from_websocket_key(&self, key: &str) -> Result<Option<Arc<RwLock<Session>>>> {
+        let map = self
+            .socket_key_to_session
             .read()
             .map_err(|_e| anyhow!("could not lock key set"))?;
         Ok(map.get(key).cloned())
-    }
-
-    #[allow(dead_code)]
-    pub fn get_fun<F, T>(&self, key: &str, callback: F) -> Result<T>
-    where
-        F: FnOnce(Option<Arc<RwLock<Session>>>) -> Result<T>,
-    {
-        let map = self
-            .inner
-            .read()
-            .map_err(|_e| anyhow!("could not lock key set"))?;
-        callback(map.get(key).cloned())
-    }
-
-    #[allow(dead_code)]
-    pub fn contains_key(&self, key: &str) -> Result<bool> {
-        let map = self
-            .inner
-            .read()
-            .map_err(|_e| anyhow!("could not lock key set"))?;
-        Ok(map.contains_key(key))
     }
 }
