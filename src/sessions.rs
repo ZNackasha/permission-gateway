@@ -2,11 +2,8 @@ use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-use std::time::Duration;
-use tokio::time::timeout;
 
 use crate::session::Session;
-use crate::utils;
 
 type Sessions = HashMap<String, Arc<RwLock<Session>>>;
 
@@ -52,32 +49,15 @@ impl SafeSessions {
         let token = session.get_refresh_jwt().get_full_token().to_string();
 
         if let Some(old_session) = map.get(&token) {
-            session.socket_session = old_session
-                .read()
-                .or(Err(anyhow!("could not read old_session")))?
-                .socket_session
-                .clone();
+            if let Some(old_session) = old_session.read().ok() {
+                session.update_socket_session(
+                    &old_session
+                        .get_socket_session()
+                        .ok_or_else(|| anyhow!("could not read old_session"))?
+                        .clone(),
+                );
+            }
         }
-
-        tokio::spawn(async move {
-            let _ = timeout(
-                Duration::from_secs(
-                    session.get_access_jwt().get_payload().exp
-                        - utils::get_current_unix_timestamp(),
-                ),
-                async {
-                    if let Some(set) = self.get(&session)? {
-                        set.read()
-                            .or(Err(anyhow!("could not read session")))?
-                            .socket_session
-                            .map(|s| {
-                                s.transmitter.send("Session expired".to_string()).unwrap();
-                            });
-                    }
-                },
-            )
-            .await;
-        });
 
         let session = Arc::new(RwLock::new(session));
         map.insert(token, session.clone());

@@ -1,35 +1,24 @@
 use anyhow::{anyhow, Result};
-use hyper_util::rt::TokioIo;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-use tokio::net::TcpStream;
-use tokio_tungstenite::MaybeTlsStream;
-use tokio_tungstenite::WebSocketStream;
 
 use crate::jwt::Jwt;
-
-#[derive(Debug)]
-pub struct SocketStreams {
-    pub server_ws_stream: Arc<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    pub client_ws_stream: Arc<WebSocketStream<TokioIo<hyper::upgrade::Upgraded>>>,
-}
 
 #[derive(Debug)]
 pub struct SocketSession {
     pub uuid: String,
     pub hash: String,
-    pub receiver: tokio::sync::broadcast::Receiver<String>,
     pub transmitter: tokio::sync::broadcast::Sender<String>,
     // pub socket_streams: Vec<Arc<Mutex<SocketStreams>>>,
 }
 
 #[derive(Debug)]
 pub struct Session {
-    pub refresh_jwt: Jwt,
-    pub access_jwt: Jwt,
-    pub permissions: Vec<Arc<String>>,
-    pub socket_session: Arc<Option<SocketSession>>,
+    refresh_jwt: Jwt,
+    access_jwt: Jwt,
+    permissions: Vec<Arc<String>>,
+    socket_session: Option<Arc<SocketSession>>,
 }
 
 lazy_static::lazy_static! {
@@ -42,7 +31,7 @@ impl Session {
             refresh_jwt,
             access_jwt,
             permissions: vec![],
-            socket_session: Arc::new(None),
+            socket_session: None,
         }
     }
 
@@ -100,14 +89,17 @@ impl Session {
     }
 
     pub fn set_socket_session(&mut self, uuid: String, hash: String) {
-        let (tx, rx) = tokio::sync::broadcast::channel(16);
+        let (tx, _) = tokio::sync::broadcast::channel(16);
         let socket_session = SocketSession {
             uuid,
             hash,
-            receiver: rx,
             transmitter: tx,
         };
-        self.socket_session = Arc::new(Some(socket_session));
+        self.socket_session = Some(Arc::new(socket_session));
+    }
+
+    pub fn update_socket_session(&mut self, socket_session: &Arc<SocketSession>) {
+        self.socket_session = Some(socket_session.clone());
     }
 
     fn get_or_insert_arc_string(value: &str) -> Arc<String> {
@@ -142,5 +134,9 @@ impl Session {
 
     pub fn get_refresh_jwt(&self) -> &Jwt {
         &self.refresh_jwt
+    }
+
+    pub fn get_socket_session(&self) -> Option<&Arc<SocketSession>> {
+        self.socket_session.as_ref()
     }
 }

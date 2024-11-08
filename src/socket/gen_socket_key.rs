@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use crate::{
     config,
-    session::{self, Session, SocketSession},
+    session::{Session, SocketSession},
     utils,
 };
 
@@ -16,7 +16,7 @@ pub fn gen_socket_key(
     if session
         .read()
         .or(Err(anyhow!("could not read from RWLock")))?
-        .permissions
+        .get_permissions()
         .len()
         == 0
     {
@@ -28,15 +28,14 @@ pub fn gen_socket_key(
     let (uuid, hash) = session
         .read()
         .or(Err(anyhow!("could not read from RWLock")))?
-        .socket_session
-        .as_ref()
+        .get_socket_session()
         .map_or_else(
             || {
                 let uuid = utils::generate_uuid();
                 let hash = utils::cypher_hash_string(&uuid, &config.socket_encryption_key);
                 (uuid, hash)
             },
-            |user: &SocketSession| (user.uuid.clone(), user.hash.clone()),
+            |user: &Arc<SocketSession>| (user.uuid.clone(), user.hash.clone()),
         );
 
     session

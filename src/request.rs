@@ -2,10 +2,60 @@ use anyhow::{anyhow, Result};
 use http_body_util::{BodyExt, Full};
 use hyper::{body::Bytes, Request, Response, Uri};
 use hyper_util::client::legacy::connect::HttpConnector;
-use std::sync::Arc;
+use std::{
+    sync::{Arc, RwLock},
+    time::Duration,
+};
+use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::http::uri::Scheme;
 
-use crate::{config, session, sessions, socket, user, utils};
+use crate::{config, session::Session, sessions, socket, user, utils};
+
+async fn set_timer(session: Arc<RwLock<Session>>, active_sessions: Arc<sessions::SafeSessions>) {
+    let timeout = timeout(
+        match session.clone().read() {
+            Ok(session) => Duration::from_secs(
+                session.get_access_jwt().get_payload().exp - utils::get_current_unix_timestamp(),
+            ),
+            Err(_) => {
+                eprintln!("Error reading session");
+                Duration::from_secs(0)
+            }
+        },
+        async move {
+            match session.read() {
+                Ok(session) => match active_sessions.get(&session) {
+                    Ok(Some(set)) => {
+                        if let Ok(session) = set.read() {
+                            if session.get_access_jwt().is_expired() {
+                                if let Some(socket_session) = session.get_socket_session() {
+                                    socket_session
+                                        .transmitter
+                                        .send("Session expired".to_string())
+                                        .unwrap();
+                                    match active_sessions.remove(&session) {
+                                        Ok(_) => (),
+                                        Err(_) => eprintln!("Error removing session"),
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ok(None) => (),
+                    Err(e) => eprintln!("Error getting session: {:?}", e),
+                },
+                Err(e) => eprintln!("Error reading session: {:?}", e),
+            }
+        },
+    );
+
+    tokio::spawn(async move {
+        match timeout.await {
+            Ok(_) => (),
+            Err(_) => eprintln!("Error setting timer"),
+        }
+    });
+}
 
 pub async fn handle_request(
     req: Request<hyper::body::Incoming>,
@@ -16,21 +66,19 @@ pub async fn handle_request(
     let cookies = utils::get_cookies(&req);
 
     // get access tocken from cookies
-    let mut session = session::Session::from_cookies(
+    let mut session = Session::from_cookies(
         cookies,
         &config.access_token_jwt_cookie_name,
         &config.refresh_token_jwt_cookie_name,
     )?;
 
-    if session.get_access_jwt().is_expired() {
-        return Err(anyhow!("token expired"));
-    }
-
     let session = match active_sessions.get(&session)? {
         None => {
             let permissions = user::get_user_permissions(&session, &config).await?;
             session.set_permissions(permissions);
-            active_sessions.insert(session)?
+            let session = active_sessions.insert(session)?;
+            set_timer(session.clone(), active_sessions.clone()).await;
+            session
         }
         Some(cur_session) => {
             if cur_session
@@ -41,7 +89,9 @@ pub async fn handle_request(
             {
                 let permissions = user::get_user_permissions(&session, &config).await?;
                 session.set_permissions(permissions);
-                active_sessions.update(session)?.clone()
+                let session = active_sessions.update(session)?.clone();
+                set_timer(session.clone(), active_sessions.clone()).await;
+                session
             } else {
                 cur_session.clone()
             }
@@ -74,7 +124,7 @@ pub async fn handle_request(
                     session
                         .read()
                         .unwrap()
-                        .permissions
+                        .get_permissions()
                         .iter()
                         .map(|arc_str| arc_str.as_str())
                         .collect::<Vec<&str>>()

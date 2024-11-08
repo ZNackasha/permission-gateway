@@ -8,7 +8,6 @@ use hyper::body::Bytes;
 use hyper::{Request, Response};
 use hyper_tungstenite::HyperWebsocket;
 use tokio::task::JoinHandle;
-use tokio::time::timeout;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::session::Session;
@@ -36,43 +35,80 @@ async fn serve_websocket(
     let (mut server_write, mut server_read) = server_ws_stream.split();
     let (mut client_write, mut client_read) = client_ws_stream.split();
 
-    let session2 = session.clone();
+    let session_inst = session.clone();
 
     // Forward messages from the client to the server
     let server_to_client: JoinHandle<Result<()>> = tokio::spawn(async move {
-        while let Some(msg) = server_read.next().await {
-            let msg = msg.unwrap();
-            if session2
-                .read()
-                .or(Err(anyhow!("could not read from RWLock")))?
-                .access_jwt
-                .is_expired()
-            {
-                client_write.close();
-                break;
+        let mut receiver = session_inst
+            .read()
+            .or(Err(anyhow!("could not read from RWLock")))?
+            .get_socket_session()
+            .ok_or_else(|| anyhow!("could not get socket session"))?
+            .transmitter
+            .subscribe();
+
+        loop {
+            tokio::select! {
+                msg = server_read.next() => {
+                if let Some(msg) = msg {
+                    let msg = msg?;
+                    if session_inst
+                    .read()
+                    .or(Err(anyhow!("could not read from RWLock")))?
+                    .get_access_jwt()
+                    .is_expired()
+                    {
+                        client_write.close().await?;
+                        break;
+                    }
+                    client_write.send(msg).await?;
+                }
+                },
+                _ = receiver.recv() => {
+                // Handle receiver event if needed
+                    client_write.close().await?;
+                    break;
+                }
             }
-            client_write.send(msg).await.unwrap();
         }
         Ok(())
     });
 
-    let session = session.clone();
+    let session_inst = session.clone();
 
     // Forward messages from the server to the client
     let client_to_server: JoinHandle<Result<()>> = tokio::spawn(async move {
-        while let Some(msg) = client_read.next().await {
-            let msg = msg.unwrap();
-            if session
-                .clone()
-                .read()
-                .or(Err(anyhow!("could not read from RWLock")))?
-                .access_jwt
-                .is_expired()
-            {
-                server_write.close();
-                break;
+        let mut receiver = session_inst
+            .read()
+            .or(Err(anyhow!("could not read from RWLock")))?
+            .get_socket_session()
+            .ok_or_else(|| anyhow!("could not get socket session"))?
+            .transmitter
+            .subscribe();
+
+        loop {
+            tokio::select! {
+                msg = client_read.next() => {
+                    if let Some(msg) = msg {
+                        let msg = msg?;
+                        if session_inst
+                            .read()
+                            .or(Err(anyhow!("could not read from RWLock")))?
+                            .get_access_jwt()
+                            .is_expired()
+                        {
+                            server_write.close().await?;
+                            break;
+                        }
+                        server_write.send(msg).await?;
+                    }
+                },
+                _ = receiver.recv() => {
+                // Handle receiver event if needed
+                    server_write.close().await?;
+                    break;
+                }
             }
-            server_write.send(msg).await.unwrap();
         }
         Ok(())
     });
